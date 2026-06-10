@@ -42,3 +42,10 @@ export async function signUp(formData: FormData) {
 
   return redirect("/login?message=Check email to continue sign in process");
 }
+
+export async function signOut() {
+  const cookieStore = cookies();
+  const supabase = createClient(cookieStore);
+  await supabase.auth.signOut();
+  return redirect("/login");
+}

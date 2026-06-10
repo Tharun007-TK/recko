@@ -26,7 +26,7 @@ export default async function DashboardLayout({
 
       {/* ── Main content area ───────────────────────── */}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-        <TopBar />
+        <TopBar user={session.user} />
         <main className="flex-1 overflow-y-auto">
           <div className="px-6 py-6 max-w-screen-xl mx-auto">{children}</div>
         </main>

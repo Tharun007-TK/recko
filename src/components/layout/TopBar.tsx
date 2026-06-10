@@ -2,14 +2,18 @@
 
 import { usePathname } from "next/navigation";
 import { Bell, LogOut, ChevronDown, User } from "lucide-react";
-import { cn } from "@/lib/utils";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { signOut } from "@/actions/auth";
 
-/**
- * Top bar shown in all authenticated dashboard pages.
- * Displays a page title derived from the current route, plus a user menu stub.
- * User data + sign-out action will be wired in Prompt 2 (Supabase auth).
- */
-export function TopBar() {
+export function TopBar({ user }: { user: any }) {
   const pathname = usePathname();
   const pageTitle = getPageTitle(pathname);
 
@@ -29,18 +33,42 @@ export function TopBar() {
           <Bell className="h-4 w-4" />
         </button>
 
-        {/* User menu stub */}
-        <button
-          type="button"
-          className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-          aria-label="User menu"
-        >
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-muted">
-            <User className="h-4 w-4" />
-          </span>
-          <span className="hidden sm:inline-block font-medium">Account</span>
-          <ChevronDown className="h-3 w-3 opacity-60" />
-        </button>
+        {/* User menu */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+              aria-label="User menu"
+            >
+              <Avatar className="h-7 w-7">
+                <AvatarImage src={user?.user_metadata?.avatar_url} />
+                <AvatarFallback>
+                  <User className="h-4 w-4" />
+                </AvatarFallback>
+              </Avatar>
+              <span className="hidden sm:inline-block font-medium">
+                {user?.user_metadata?.full_name ?? user?.email}
+              </span>
+              <ChevronDown className="h-3 w-3 opacity-60" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuLabel>My Account</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem>Settings</DropdownMenuItem>
+            <DropdownMenuItem>Support</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <form action={signOut}>
+              <DropdownMenuItem asChild>
+                <button type="submit" className="w-full">
+                  <LogOut className="mr-2 h-4 w-4" />
+                  <span>Log out</span>
+                </button>
+              </DropdownMenuItem>
+            </form>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </header>
   );

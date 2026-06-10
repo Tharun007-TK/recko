@@ -50,3 +50,102 @@ export function formatFileSize(bytes: number): string {
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${units[i]}`;
 }
+
+/**
+ * ─── File Validation ──────────────────────────────────────────
+ */
+
+const ALLOWED_EXTENSIONS = [".xlsx", ".xls"];
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
+
+export interface FileValidationError {
+  field: string;
+  message: string;
+}
+
+export function validateFileExtension(filename: string): boolean {
+  const ext = filename.substring(filename.lastIndexOf(".")).toLowerCase();
+  return ALLOWED_EXTENSIONS.includes(ext);
+}
+
+export function validateFileSize(file: File): boolean {
+  return file.size <= MAX_FILE_SIZE;
+}
+
+export function validateExcelFile(
+  file: File,
+  fieldName: string,
+): FileValidationError | null {
+  if (!file) {
+    return {
+      field: fieldName,
+      message: "File is required",
+    };
+  }
+
+  if (!validateFileExtension(file.name)) {
+    return {
+      field: fieldName,
+      message: `Invalid file type. Allowed types: ${ALLOWED_EXTENSIONS.join(", ")}`,
+    };
+  }
+
+  if (!validateFileSize(file)) {
+    return {
+      field: fieldName,
+      message: `File size exceeds ${MAX_FILE_SIZE / (1024 * 1024)} MB limit`,
+    };
+  }
+
+  return null;
+}
+
+export function validateJobForm(formData: {
+  jobName: string;
+  tallyFile?: File;
+  gstFile?: File;
+  mappingProfileId?: string;
+  ruleProfileId?: string;
+}): FileValidationError[] {
+  const errors: FileValidationError[] = [];
+
+  if (!formData.jobName || !formData.jobName.trim()) {
+    errors.push({
+      field: "jobName",
+      message: "Job name is required",
+    });
+  }
+
+  if (formData.jobName && formData.jobName.trim().length > 255) {
+    errors.push({
+      field: "jobName",
+      message: "Job name must not exceed 255 characters",
+    });
+  }
+
+  if (formData.tallyFile) {
+    const tallyError = validateExcelFile(formData.tallyFile, "tallyFile");
+    if (tallyError) {
+      errors.push(tallyError);
+    }
+  } else {
+    errors.push({
+      field: "tallyFile",
+      message: "Tally file is required",
+    });
+  }
+
+  if (formData.gstFile) {
+    const gstError = validateExcelFile(formData.gstFile, "gstFile");
+    if (gstError) {
+      errors.push(gstError);
+    }
+  } else {
+    errors.push({
+      field: "gstFile",
+      message: "GST file is required",
+    });
+  }
+
+  return errors;
+}
