@@ -48,3 +48,11 @@ backend/venv/
 backend/__pycache__/
 backend/samples/
 frontend/.next/
+
+# Python bytecode (all locations)
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Visual Studio IDE artifacts
+.vs/
