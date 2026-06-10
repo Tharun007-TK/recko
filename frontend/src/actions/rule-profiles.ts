@@ -13,7 +13,7 @@ async function getUserFirmId(
   const { data: firmMembers } = await supabase
     .from("firm_members")
     .select("firm_id")
-    .eq("profile_id", userId)
+    .eq("user_id", userId)
     .limit(1);
 
   return firmMembers?.[0]?.firm_id || null;
@@ -29,14 +29,14 @@ export async function createRuleProfile(
   const supabase = await createClient();
 
   const {
-    data: { session },
-  } = await supabase.auth.getSession();
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  if (!session) {
+  if (!user) {
     return { success: false, message: "Authentication required" };
   }
 
-  const firmId = await getUserFirmId(supabase, session.user.id);
+  const firmId = await getUserFirmId(supabase, user.id);
   if (!firmId) {
     return { success: false, message: "User is not a member of any firm" };
   }
@@ -71,8 +71,8 @@ export async function createRuleProfile(
     .insert({
       firm_id: firmId,
       name: name.trim(),
-      description: description.trim() || null,
-      rules,
+      rules_json: rules,
+      created_by: user.id,
     })
     .select()
     .single();
@@ -99,10 +99,10 @@ export async function updateRuleProfile(
   const supabase = await createClient();
 
   const {
-    data: { session },
-  } = await supabase.auth.getSession();
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  if (!session) {
+  if (!user) {
     return { success: false, message: "Authentication required" };
   }
 
@@ -136,8 +136,7 @@ export async function updateRuleProfile(
     .from("rule_profiles")
     .update({
       name: name.trim(),
-      description: description.trim() || null,
-      rules,
+      rules_json: rules,
     })
     .eq("id", profileId);
 
@@ -159,10 +158,10 @@ export async function deleteRuleProfile(profileId: string): Promise<{
   const supabase = await createClient();
 
   const {
-    data: { session },
-  } = await supabase.auth.getSession();
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  if (!session) {
+  if (!user) {
     return { success: false, message: "Authentication required" };
   }
 

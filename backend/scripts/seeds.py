@@ -21,21 +21,22 @@ def run_seed():
     else:
         user_id = users[0].id
     
-    # Create Firm
-    firm_res = client.table("firms").insert({"name": "Test Firm LLC"}).execute()
+    # Check if firm exists, otherwise create it
+    firm_res = client.table("firms").select("id").eq("slug", "test-firm-llc").execute()
+    if not firm_res.data:
+        firm_res = client.table("firms").insert({"name": "Test Firm LLC", "slug": "test-firm-llc", "created_by": user_id}).execute()
     firm_id = firm_res.data[0]["id"]
     
     # Create Profile
-    client.table("profiles").upsert({"id": user_id, "full_name": "Test User", "role": "admin"}).execute()
+    client.table("profiles").upsert({"id": user_id, "full_name": "Test User"}).execute()
     
     # Link User to Firm
-    client.table("firm_members").upsert({"firm_id": firm_id, "profile_id": user_id, "role": "admin"}).execute()
+    client.table("firm_members").upsert({"firm_id": firm_id, "user_id": user_id, "role": "owner"}).execute()
     
     # Create Mapping Profile
     mapping_res = client.table("mapping_profiles").insert({
         "firm_id": firm_id,
         "name": "Standard GST Mapping",
-        "description": "Standard mapping for Tally to GST",
         "mappings": [
             {"tally_column": "Invoice No", "gst_column": "Invoice Number", "is_match_key": True},
             {"tally_column": "Date", "gst_column": "Invoice Date", "is_match_key": False},
@@ -49,7 +50,6 @@ def run_seed():
     rule_res = client.table("rule_profiles").insert({
         "firm_id": firm_id,
         "name": "Standard Rules",
-        "description": "Standard normalization rules",
         "rules": {
             "trim_spaces": True,
             "ignore_case": True,

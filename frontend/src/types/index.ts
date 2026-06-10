@@ -61,7 +61,7 @@ export interface JobSummary {
   format_differences: number;
 }
 
-export type JobFileType = "tally" | "gst" | "report";
+export type JobFileType = "tally_source" | "gst_source" | "report_output";
 
 export interface JobFile {
   id: string;

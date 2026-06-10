@@ -43,8 +43,8 @@ async def run_reconciliation_task(job_id: str, firm_id: str):
 
         # 4. Fetch job files
         job_files = supabase.get_job_files(job_id)
-        tally_file = next((f for f in job_files if f.get("file_type") == "tally"), None)
-        gst_file = next((f for f in job_files if f.get("file_type") == "gst"), None)
+        tally_file = next((f for f in job_files if f.get("file_type") == "tally_source"), None)
+        gst_file = next((f for f in job_files if f.get("file_type") == "gst_source"), None)
 
         if not tally_file or not gst_file:
             logger.error("Missing Tally or GST file")
@@ -99,9 +99,11 @@ async def run_reconciliation_task(job_id: str, firm_id: str):
             supabase.insert_job_file(
                 job_id=job_id,
                 firm_id=firm_id,
-                file_type="report",
+                file_type="report_output",
                 storage_path=report_path,
-                original_filename="reconciliation_report.xlsx"
+                original_filename="reconciliation_report.xlsx",
+                file_size_bytes=len(report_data),
+                created_by=job.get("created_by")
             )
 
         # 13. Update job summary

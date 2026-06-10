@@ -19,10 +19,10 @@ export default async function RulesPage() {
   const supabase = await createClient();
 
   const {
-    data: { session },
-  } = await supabase.auth.getSession();
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  if (!session) {
+  if (!user) {
     return <div>Authentication required</div>;
   }
 
@@ -30,7 +30,7 @@ export default async function RulesPage() {
   const { data: firmMembers } = await supabase
     .from("firm_members")
     .select("firm_id")
-    .eq("profile_id", session.user.id)
+    .eq("user_id", user.id)
     .limit(1);
 
   const firmId = firmMembers?.[0]?.firm_id;
@@ -41,7 +41,10 @@ export default async function RulesPage() {
     .select("*")
     .eq("firm_id", firmId)
     .order("created_at", { ascending: false });
-  const profiles = profilesData || [];
+  const profiles = (profilesData || []).map(p => ({
+    ...p,
+    rules: p.rules_json || {}
+  }));
 
   return (
     <div className="space-y-6">

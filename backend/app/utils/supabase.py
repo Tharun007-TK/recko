@@ -128,6 +128,10 @@ class SupabaseClient:
         file_type: str,
         storage_path: str,
         original_filename: str,
+        storage_bucket: str = "job-files",
+        file_size_bytes: int = 0,
+        mime_type: str = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        created_by: str = None,
     ) -> bool:
         """Insert a job file record"""
         try:
@@ -138,6 +142,10 @@ class SupabaseClient:
                     "file_type": file_type,
                     "storage_path": storage_path,
                     "original_filename": original_filename,
+                    "storage_bucket": storage_bucket,
+                    "file_size_bytes": file_size_bytes,
+                    "mime_type": mime_type,
+                    "created_by": created_by,
                 }
             ).execute()
             return True

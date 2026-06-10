@@ -33,8 +33,9 @@ function SummaryCard({ label, value, icon }: SummaryCardProps) {
 export default async function JobDetailPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
+  const { id } = await params;
   const supabase = await createClient();
 
   // Fetch job with creator profile
@@ -42,12 +43,12 @@ export default async function JobDetailPage({
     .from("reconciliation_jobs")
     .select(
       `
-      id, firm_id, created_by, status, summary, created_at, updated_at,
+      id, firm_id, created_by, status, summary:summary_json, created_at, updated_at,
       mapping_profiles (id, name),
       rule_profiles (id, name)
       `,
     )
-    .eq("id", params.id)
+    .eq("id", id)
     .single();
 
   if (jobError || !job) {
@@ -58,7 +59,7 @@ export default async function JobDetailPage({
   const { data: jobFilesData } = await supabase
     .from("job_files")
     .select("*")
-    .eq("job_id", params.id);
+    .eq("job_id", id);
   const jobFiles = jobFilesData || [];
 
   // Fetch creator profile
@@ -72,14 +73,14 @@ export default async function JobDetailPage({
   const { data: mismatchesData } = await supabase
     .from("mismatch_items")
     .select("*")
-    .eq("job_id", params.id)
+    .eq("job_id", id)
     .order("created_at", { ascending: false })
     .limit(100);
   const mismatches = mismatchesData || [];
 
-  const tallyFile = jobFiles.find((f) => f.file_type === "tally");
-  const gstFile = jobFiles.find((f) => f.file_type === "gst");
-  const reportFile = jobFiles.find((f) => f.file_type === "report");
+  const tallyFile = jobFiles.find((f) => f.file_type === "tally_source");
+  const gstFile = jobFiles.find((f) => f.file_type === "gst_source");
+  const reportFile = jobFiles.find((f) => f.file_type === "report_output");
 
   let reportUrl: string | null = null;
   if (job.status === "completed" && reportFile) {

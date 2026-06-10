@@ -22,7 +22,7 @@ async function getUserFirmId(
   const { data: firmMembers, error } = await supabase
     .from("firm_members")
     .select("firm_id")
-    .eq("profile_id", userId)
+    .eq("user_id", userId)
     .limit(1);
 
   if (error || !firmMembers || firmMembers.length === 0) {
@@ -39,9 +39,9 @@ export async function createJob(
   const supabase = await createClient();
 
   const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  if (!session) {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
     return { success: false, message: "Authentication required" };
   }
 
@@ -69,7 +69,7 @@ export async function createJob(
   }
 
   // Get user's firm ID
-  const firmId = await getUserFirmId(supabase, session.user.id);
+  const firmId = await getUserFirmId(supabase, user.id);
   if (!firmId) {
     return { success: false, message: "User is not a member of any firm" };
   }
@@ -79,7 +79,7 @@ export async function createJob(
     .from("reconciliation_jobs")
     .insert({
       firm_id: firmId,
-      created_by: session.user.id,
+      created_by: user.id,
       status: "uploaded",
       mapping_profile_id: mappingProfileId,
       rule_profile_id: ruleProfileId,
@@ -94,12 +94,18 @@ export async function createJob(
 
   // 2. Upload files to Supabase Storage
   const tallyPath = generateStoragePath(
-    session.user.id,
+    user.id,
     job.id,
     "tally",
     tallyFile.name,
   );
-  const { error: tallyError } = await supabase.storage
+  // Create admin client for storage operations
+  const adminClient = require("@supabase/supabase-js").createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+
+  const { error: tallyError } = await adminClient.storage
     .from(getBucketName())
     .upload(tallyPath, tallyFile);
 
@@ -111,45 +117,54 @@ export async function createJob(
   }
 
   const gstPath = generateStoragePath(
-    session.user.id,
+    user.id,
     job.id,
     "gst",
     gstFile.name,
   );
-  const { error: gstError } = await supabase.storage
+  const { error: gstError } = await adminClient.storage
     .from(getBucketName())
     .upload(gstPath, gstFile);
 
   if (gstError) {
     console.error("Error uploading GST file:", gstError);
     // Clean up previous uploads
-    await supabase.storage.from(getBucketName()).remove([tallyPath]);
+    await adminClient.storage.from(getBucketName()).remove([tallyPath]);
     await supabase.from("reconciliation_jobs").delete().eq("id", job.id);
     return { success: false, message: "Failed to upload GST file" };
   }
 
   // 3. Create job_files records
+  const bucketName = getBucketName();
   const { error: filesError } = await supabase.from("job_files").insert([
     {
       job_id: job.id,
       firm_id: firmId,
-      file_type: "tally",
+      created_by: user.id,
+      file_type: "tally_source",
+      storage_bucket: bucketName,
       storage_path: tallyPath,
       original_filename: tallyFile.name,
+      file_size_bytes: tallyFile.size,
+      mime_type: tallyFile.type,
     },
     {
       job_id: job.id,
       firm_id: firmId,
-      file_type: "gst",
+      created_by: user.id,
+      file_type: "gst_source",
+      storage_bucket: bucketName,
       storage_path: gstPath,
       original_filename: gstFile.name,
+      file_size_bytes: gstFile.size,
+      mime_type: gstFile.type,
     },
   ]);
 
   if (filesError) {
     console.error("Error creating job files records:", filesError);
     // Clean up uploads and job
-    await supabase.storage.from(getBucketName()).remove([tallyPath, gstPath]);
+    await adminClient.storage.from(getBucketName()).remove([tallyPath, gstPath]);
     await supabase.from("reconciliation_jobs").delete().eq("id", job.id);
     return { success: false, message: "Failed to create job file records" };
   }
@@ -181,9 +196,12 @@ export async function createJob(
 }
 
 export async function getReportDownloadUrl(storagePath: string): Promise<string | null> {
-  const supabase = await createClient();
+  const adminClient = require("@supabase/supabase-js").createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
 
-  const { data, error } = await supabase.storage
+  const { data, error } = await adminClient.storage
     .from(getBucketName())
     .createSignedUrl(storagePath, 60 * 60); // 1 hour
 

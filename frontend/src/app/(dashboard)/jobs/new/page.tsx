@@ -18,10 +18,10 @@ export default async function NewJobPage() {
   const supabase = await createClient();
 
   const {
-    data: { session },
-  } = await supabase.auth.getSession();
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  if (!session) {
+  if (!user) {
     return <div>Authentication required</div>;
   }
 
@@ -29,26 +29,26 @@ export default async function NewJobPage() {
   const { data: firmMembers } = await supabase
     .from("firm_members")
     .select("firm_id")
-    .eq("profile_id", session.user.id)
+    .eq("user_id", user.id)
     .limit(1);
 
   const firmId = firmMembers?.[0]?.firm_id;
 
-  // Fetch mapping profiles for the firm
+  // Fetch available profiles for dropdowns
   const { data: mappingProfilesData } = await supabase
     .from("mapping_profiles")
-    .select("id, name")
+    .select("id, name, mapping_json")
     .eq("firm_id", firmId)
     .order("created_at", { ascending: false });
-  const mappingProfiles = mappingProfilesData || [];
 
-  // Fetch rule profiles for the firm
   const { data: ruleProfilesData } = await supabase
     .from("rule_profiles")
-    .select("id, name")
+    .select("id, name, rules_json")
     .eq("firm_id", firmId)
     .order("created_at", { ascending: false });
-  const ruleProfiles = ruleProfilesData || [];
+
+  const mappingProfiles = (mappingProfilesData || []).map(p => ({ ...p, mappings: p.mapping_json || [] }));
+  const ruleProfiles = (ruleProfilesData || []).map(p => ({ ...p, rules: p.rules_json || {} }));
 
   return (
     <div className="space-y-6">

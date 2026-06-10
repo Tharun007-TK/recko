@@ -15,10 +15,10 @@ export default async function JobsPage() {
   const supabase = await createClient();
 
   const {
-    data: { session },
-  } = await supabase.auth.getSession();
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  if (!session) {
+  if (!user) {
     return <div>Authentication required</div>;
   }
 
@@ -26,7 +26,7 @@ export default async function JobsPage() {
   const { data: firmMembers } = await supabase
     .from("firm_members")
     .select("firm_id")
-    .eq("profile_id", session.user.id)
+    .eq("user_id", user.id)
     .limit(1);
 
   const firmId = firmMembers?.[0]?.firm_id;
@@ -36,7 +36,7 @@ export default async function JobsPage() {
     .from("reconciliation_jobs")
     .select(
       `
-      id, firm_id, created_by, status, summary, created_at,
+      id, firm_id, created_by, status, summary:summary_json, created_at,
       mapping_profiles (name),
       rule_profiles (name)
       `,

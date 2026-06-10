@@ -10,10 +10,10 @@ export default async function DashboardLayout({
 }) {
   const supabase = await createClient();
   const {
-    data: { session },
-  } = await supabase.auth.getSession();
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  if (!session) {
+  if (!user) {
     redirect("/login");
   }
 
@@ -24,7 +24,7 @@ export default async function DashboardLayout({
 
       {/* ── Main content area ───────────────────────── */}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-        <TopBar user={session.user} />
+        <TopBar user={user} />
         <main className="flex-1 overflow-y-auto">
           <div className="px-6 py-6 max-w-screen-xl mx-auto">{children}</div>
         </main>
