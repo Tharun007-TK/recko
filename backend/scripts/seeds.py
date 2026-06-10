@@ -13,16 +13,16 @@ def run_seed():
         
     client = create_client(supabase_url, supabase_key)
     
-    # Check if a user exists
     users = client.auth.admin.list_users()
     if not users:
-        print("No users found. Please create a user via the UI first.")
-        return
-        
-    user_id = users[0].id
+        print("No users found. Creating test@example.com / password123")
+        res = client.auth.admin.create_user({"email": "test@example.com", "password": "password123", "email_confirm": True})
+        user_id = res.user.id
+    else:
+        user_id = users[0].id
     
     # Create Firm
-    firm_res = client.table("firms").insert({"name": "Test Firm LLC", "plan": "pro"}).execute()
+    firm_res = client.table("firms").insert({"name": "Test Firm LLC"}).execute()
     firm_id = firm_res.data[0]["id"]
     
     # Create Profile

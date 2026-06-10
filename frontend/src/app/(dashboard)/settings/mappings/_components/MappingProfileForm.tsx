@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { FieldMappingEditor } from "@/components/shared/FieldMappingEditor";
 import { createMappingProfile } from "@/actions/mapping-profiles";
-import { useFormState } from "react-dom";
+import { useActionState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertCircle, CheckCircle2 } from "lucide-react";
 import { useState } from "react";
@@ -22,7 +22,7 @@ const initialState = {
 };
 
 export function MappingProfileForm({ firmId }: MappingProfileFormProps) {
-  const [state, formAction] = useFormState(createMappingProfile, initialState);
+  const [state, formAction] = useActionState(createMappingProfile, initialState);
   const [mappings, setMappings] = useState<FieldMapping[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 

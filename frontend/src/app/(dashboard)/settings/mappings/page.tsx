@@ -11,7 +11,6 @@ import { createClient } from "@/lib/supabase/server";
 import type { Metadata } from "next";
 import { MappingProfilesList } from "./_components/MappingProfilesList";
 import { MappingProfileForm } from "./_components/MappingProfileForm";
-import { useState } from "react";
 
 export const metadata: Metadata = {
   title: "Mapping Profiles",

@@ -5,30 +5,36 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+const MONTHS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
 /**
- * Format a UTC ISO string as a short locale date.
+ * Format a UTC ISO string as a short date.
+ * Uses deterministic UTC parts to avoid SSR/client hydration mismatches.
  * Example: "10 Jun 2026"
  */
 export function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
+  const d = new Date(iso);
+  return `${d.getUTCDate().toString().padStart(2, "0")} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 }
 
 /**
- * Format a UTC ISO string as a locale datetime.
+ * Format a UTC ISO string as a short datetime.
+ * Uses deterministic UTC parts to avoid SSR/client hydration mismatches.
  * Example: "10 Jun 2026, 11:52 AM"
  */
 export function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const d = new Date(iso);
+  const day = d.getUTCDate().toString().padStart(2, "0");
+  const month = MONTHS[d.getUTCMonth()];
+  const year = d.getUTCFullYear();
+  const hours24 = d.getUTCHours();
+  const minutes = d.getUTCMinutes().toString().padStart(2, "0");
+  const ampm = hours24 >= 12 ? "PM" : "AM";
+  const hours12 = (hours24 % 12 || 12).toString().padStart(2, "0");
+  return `${day} ${month} ${year}, ${hours12}:${minutes} ${ampm}`;
 }
 
 /**

@@ -14,7 +14,7 @@ export async function signIn(formData: FormData) {
   });
 
   if (error) {
-    return redirect("/login?message=Could not authenticate user");
+    return redirect(`/login?message=${encodeURIComponent(error.message)}`);
   }
 
   return redirect("/dashboard");
@@ -23,21 +23,32 @@ export async function signIn(formData: FormData) {
 export async function signUp(formData: FormData) {
   const email = formData.get("email") as string;
   const password = formData.get("password") as string;
+  const fullName = (formData.get("full_name") as string) || "";
   const supabase = await createClient();
 
-  const { error } = await supabase.auth.signUp({
+  const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
-      emailRedirectTo: `${process.env.NEXT_PUBLIC_BASE_URL}/auth/callback`,
+      data: { full_name: fullName },
+      emailRedirectTo: `${process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(".supabase.co", "")}/auth/callback`,
     },
   });
 
   if (error) {
-    return redirect("/login?message=Could not authenticate user");
+    return redirect(`/login?tab=signup&message=${encodeURIComponent(error.message)}`);
   }
 
-  return redirect("/login?message=Check email to continue sign in process");
+  // Upsert profile row so it exists immediately
+  if (data.user) {
+    await supabase.from("profiles").upsert({
+      id: data.user.id,
+      full_name: fullName,
+      email,
+    });
+  }
+
+  return redirect("/login?tab=signup&message=Account+created!+Check+your+email+to+confirm+before+signing+in.");
 }
 
 export async function signOut() {

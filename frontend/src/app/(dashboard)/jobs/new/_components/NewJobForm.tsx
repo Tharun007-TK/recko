@@ -19,8 +19,8 @@ import {
 } from "@/components/ui/select";
 import { createJob } from "@/actions/jobs";
 import { formatFileSize } from "@/lib/utils";
-import { useFormState } from "react-dom";
-import { useEffect, useState } from "react";
+import { useActionState } from "react";
+import { useState } from "react";
 import { AlertCircle, CheckCircle2, FileUp } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
@@ -46,7 +46,7 @@ const initialState = {
 };
 
 export function NewJobForm({ mappingProfiles, ruleProfiles }: NewJobFormProps) {
-  const [state, formAction] = useFormState(createJob, initialState);
+  const [state, formAction] = useActionState(createJob, initialState);
   const [tallyFile, setTallyFile] = useState<File | null>(null);
   const [gstFile, setGstFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);

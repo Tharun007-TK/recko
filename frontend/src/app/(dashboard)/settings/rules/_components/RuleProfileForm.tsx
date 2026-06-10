@@ -5,10 +5,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { createRuleProfile } from "@/actions/rule-profiles";
-import { useFormState } from "react-dom";
+import { useActionState, useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertCircle, CheckCircle2, Info } from "lucide-react";
-import { useState } from "react";
 import type { RuleSet } from "@/types";
 
 interface RuleProfileFormProps {
@@ -29,7 +28,7 @@ const RULE_DESCRIPTIONS: Record<keyof RuleSet, string> = {
 };
 
 export function RuleProfileForm({ firmId }: RuleProfileFormProps) {
-  const [state, formAction] = useFormState(createRuleProfile, initialState);
+  const [state, formAction] = useActionState(createRuleProfile, initialState);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleFormAction = async (formData: FormData) => {
