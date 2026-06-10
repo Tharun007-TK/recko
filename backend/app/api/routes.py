@@ -2,7 +2,7 @@
 API routes for reconciliation service
 """
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, BackgroundTasks
 from typing import Optional
 import logging
 
@@ -19,33 +19,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["reconciliation"])
 
 
-@router.post("/reconciliation/start", response_model=ReconciliationStatusResponse)
-async def start_reconciliation(request: ReconciliationStartRequest):
-    """
-    Start reconciliation for a job
-    """
-    job_id = request.job_id
-    firm_id = request.firm_id
-
-    logger.info(f"Starting reconciliation for job {job_id}")
-
+async def run_reconciliation_task(job_id: str, firm_id: str):
+    """Background task to run reconciliation logic"""
+    logger.info(f"Starting reconciliation background task for job {job_id}")
     try:
         # 1. Fetch job from database
         job = supabase.get_job(job_id)
         if not job:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Job {job_id} not found",
-            )
-
-        if job.get("firm_id") != firm_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Unauthorized access to job",
-            )
-
-        # 2. Update job status to processing
-        supabase.update_job_status(job_id, "processing")
+            logger.error(f"Job {job_id} not found")
+            return
 
         # 3. Fetch mapping and rule profiles
         mapping_profile = None
@@ -65,20 +47,18 @@ async def start_reconciliation(request: ReconciliationStartRequest):
         gst_file = next((f for f in job_files if f.get("file_type") == "gst"), None)
 
         if not tally_file or not gst_file:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Missing Tally or GST file",
-            )
+            logger.error("Missing Tally or GST file")
+            supabase.update_job_status(job_id, "failed")
+            return
 
         # 5. Download files from storage
         tally_data = supabase.download_file("job-files", tally_file.get("storage_path"))
         gst_data = supabase.download_file("job-files", gst_file.get("storage_path"))
 
         if not tally_data or not gst_data:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to download files",
-            )
+            logger.error("Failed to download files")
+            supabase.update_job_status(job_id, "failed")
+            return
 
         # 6. Create reconciliation service
         service = ReconciliationService(mapping_profile, rule_profile)
@@ -89,10 +69,9 @@ async def start_reconciliation(request: ReconciliationStartRequest):
         gst_df = service.load_excel_file(io.BytesIO(gst_data))
 
         if tally_df is None or gst_df is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to parse Excel files",
-            )
+            logger.error("Failed to parse Excel files")
+            supabase.update_job_status(job_id, "failed")
+            return
 
         # 8. Apply mappings
         tally_df = service.apply_mapping(tally_df, "tally")
@@ -105,11 +84,27 @@ async def start_reconciliation(request: ReconciliationStartRequest):
         supabase.delete_job_mismatches(job_id)
 
         # 11. Insert mismatch items
-        success = supabase.insert_mismatch_items(result.mismatches)
-        if not success:
-            raise Exception("Failed to insert mismatch items")
+        if result.mismatches:
+            success = supabase.insert_mismatch_items(result.mismatches)
+            if not success:
+                raise Exception("Failed to insert mismatch items")
 
-        # 12. Update job summary
+        # 12. Generate Excel Report
+        report_data = service.generate_excel_report(result)
+        report_path = f"{firm_id}/{job_id}/reconciliation_report.xlsx"
+        upload_success = supabase.upload_file("job-files", report_path, report_data)
+        
+        if upload_success:
+            # Create job file record for report
+            supabase.insert_job_file(
+                job_id=job_id,
+                firm_id=firm_id,
+                file_type="report",
+                storage_path=report_path,
+                original_filename="reconciliation_report.xlsx"
+            )
+
+        # 13. Update job summary
         summary = {
             "total_records": result.total_records,
             "matched": result.matched,
@@ -120,29 +115,62 @@ async def start_reconciliation(request: ReconciliationStartRequest):
         }
         supabase.update_job_summary(job_id, summary)
 
-        # 13. Update job status to completed
+        # 14. Update job status to completed
         supabase.update_job_status(job_id, "completed")
 
         logger.info(f"Reconciliation completed for job {job_id}")
 
+    except Exception as e:
+        logger.error(f"Error during reconciliation: {e}", exc_info=True)
+        # Update job status to failed
+        supabase.update_job_status(job_id, "failed")
+
+
+@router.post("/reconciliation/start", response_model=ReconciliationStatusResponse)
+async def start_reconciliation(request: ReconciliationStartRequest, background_tasks: BackgroundTasks):
+    """
+    Start reconciliation for a job
+    """
+    job_id = request.job_id
+    firm_id = request.firm_id
+
+    logger.info(f"Starting reconciliation for job {job_id}")
+
+    try:
+        # 1. Fetch job from database to verify access
+        job = supabase.get_job(job_id)
+        if not job:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Job {job_id} not found",
+            )
+
+        if job.get("firm_id") != firm_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Unauthorized access to job",
+            )
+
+        # 2. Update job status to processing
+        supabase.update_job_status(job_id, "processing")
+
+        # 3. Enqueue background task
+        background_tasks.add_task(run_reconciliation_task, job_id, firm_id)
+
         return ReconciliationStatusResponse(
             job_id=job_id,
-            status="completed",
-            message="Reconciliation completed successfully",
-            summary=summary,
+            status="processing",
+            message="Reconciliation started in background",
+            summary={},
         )
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error during reconciliation: {e}", exc_info=True)
-
-        # Update job status to failed
-        supabase.update_job_status(job_id, "failed")
-
+        logger.error(f"Error starting reconciliation: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Reconciliation failed: {str(e)}",
+            detail=f"Failed to start reconciliation: {str(e)}",
         )
 
 

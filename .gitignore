@@ -42,3 +42,9 @@ next-env.d.ts
 
 # temp files
 reconflow-temp/
+
+# backend
+backend/venv/
+backend/__pycache__/
+backend/samples/
+frontend/.next/

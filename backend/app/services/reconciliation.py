@@ -312,3 +312,93 @@ class ReconciliationService:
                     )
 
         return mismatches
+
+    def generate_excel_report(self, result: ReconciliationResult) -> bytes:
+        """Generate an Excel report for the reconciliation result"""
+        import io
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment
+
+        wb = Workbook()
+        
+        # Helper to style headers
+        def style_header(ws):
+            header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+            header_font = Font(color="FFFFFF", bold=True)
+            for cell in ws[1]:
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = Alignment(horizontal="center")
+
+        # 1. Summary Sheet
+        ws_summary = wb.active
+        ws_summary.title = "Summary"
+        ws_summary.append(["Metric", "Count"])
+        ws_summary.append(["Job ID", result.job_id])
+        ws_summary.append(["Total Records Checked", result.total_records])
+        ws_summary.append(["Matched", result.matched])
+        ws_summary.append(["Mismatched", result.mismatched])
+        ws_summary.append(["Missing in GST", result.missing_in_gst])
+        ws_summary.append(["Missing in Tally", result.missing_in_tally])
+        ws_summary.append(["Format Differences", result.format_differences])
+        style_header(ws_summary)
+        ws_summary.column_dimensions['A'].width = 25
+        ws_summary.column_dimensions['B'].width = 40
+
+        # Create separate data lists for each category
+        field_mismatches = []
+        missing_in_gst = []
+        missing_in_tally = []
+
+        for m in result.mismatches:
+            row = [
+                m.get("match_key", ""),
+                m.get("field_name", ""),
+                m.get("tally_value", ""),
+                m.get("gst_value", ""),
+                m.get("normalized_tally", ""),
+                m.get("normalized_gst", ""),
+                m.get("reason", "")
+            ]
+            if m.get("category") == "field_mismatch":
+                field_mismatches.append(row)
+            elif m.get("category") == "missing_in_gst":
+                missing_in_gst.append(row)
+            elif m.get("category") == "missing_in_tally":
+                missing_in_tally.append(row)
+
+        headers = [
+            "Match Key", "Field Name", "Raw Tally Value", "Raw GST Value", 
+            "Normalized Tally", "Normalized GST", "Reason"
+        ]
+
+        # 2. Field Mismatches Sheet
+        ws_mismatches = wb.create_sheet(title="Field Mismatches")
+        ws_mismatches.append(headers)
+        for row in field_mismatches:
+            ws_mismatches.append(row)
+        style_header(ws_mismatches)
+        for col in ['A', 'B', 'C', 'D', 'E', 'F', 'G']:
+            ws_mismatches.column_dimensions[col].width = 20
+
+        # 3. Missing in GST Sheet
+        ws_missing_gst = wb.create_sheet(title="Missing in GST")
+        ws_missing_gst.append(headers)
+        for row in missing_in_gst:
+            ws_missing_gst.append(row)
+        style_header(ws_missing_gst)
+        for col in ['A', 'B', 'C', 'D', 'E', 'F', 'G']:
+            ws_missing_gst.column_dimensions[col].width = 20
+
+        # 4. Missing in Tally Sheet
+        ws_missing_tally = wb.create_sheet(title="Missing in Tally")
+        ws_missing_tally.append(headers)
+        for row in missing_in_tally:
+            ws_missing_tally.append(row)
+        style_header(ws_missing_tally)
+        for col in ['A', 'B', 'C', 'D', 'E', 'F', 'G']:
+            ws_missing_tally.column_dimensions[col].width = 20
+
+        output = io.BytesIO()
+        wb.save(output)
+        return output.getvalue()
