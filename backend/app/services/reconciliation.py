@@ -221,21 +221,18 @@ class ReconciliationService:
             if target not in df.columns:
                 df[target] = None
         
+        # Stash raw values for format differences tracking before normalization
+        df['taxable_value_raw'] = df['taxable_value'].astype(str).str.strip()
+        df['tax_amount_raw'] = df['tax_amount'].astype(str).str.strip()
+        df['invoice_date_raw'] = df['invoice_date'].astype(str).str.strip()
+        df['gstin_raw'] = df['gstin'].astype(str).str.strip()
+
         # Convert numeric columns safely
         df['taxable_value'] = pd.to_numeric(df['taxable_value'], errors='coerce').fillna(0.0)
         df['tax_amount'] = pd.to_numeric(df['tax_amount'], errors='coerce').fillna(0.0)
         
-        # Format date safely
-        def safe_date(d):
-            if pd.isna(d) or d == 'nan' or not str(d).strip():
-                return ""
-            try:
-                parsed = pd.to_datetime(d)
-                return parsed.strftime("%Y-%m-%d")
-            except Exception:
-                return str(d).strip()
-                
-        df['invoice_date'] = df['invoice_date'].apply(safe_date)
+        # Force day-first parsing to prevent 04/06/2026 from becoming April 6th
+        df['invoice_date'] = pd.to_datetime(df['invoice_date'], dayfirst=True, errors='coerce').dt.strftime('%Y-%m-%d').fillna('')
         
         # Ensure invoice_no is strictly cleaned and stripped to prevent trailing space mismatches
         df['invoice_no'] = df['invoice_no'].astype(str).str.strip()
@@ -265,13 +262,21 @@ class ReconciliationService:
             'taxable_value': 'sum',
             'tax_amount': 'sum',
             'invoice_date': 'first',
-            'gstin': 'first'
+            'gstin': 'first',
+            'taxable_value_raw': 'first',
+            'tax_amount_raw': 'first',
+            'invoice_date_raw': 'first',
+            'gstin_raw': 'first'
         })
         gst_agg = gst_clean.groupby('invoice_no', as_index=False).agg({
             'taxable_value': 'sum',
             'tax_amount': 'sum',
             'invoice_date': 'first',
-            'gstin': 'first'
+            'gstin': 'first',
+            'taxable_value_raw': 'first',
+            'tax_amount_raw': 'first',
+            'invoice_date_raw': 'first',
+            'gstin_raw': 'first'
         })
 
         # Determine total unique invoice numbers across both sets
@@ -296,51 +301,75 @@ class ReconciliationService:
             invoice_no = row['invoice_no']
             
             if merge_status == 'both':
-                taxable_gst = row['taxable_value_gst']
-                taxable_tally = row['taxable_value_tally']
-                tax_gst = row['tax_amount_gst']
-                tax_tally = row['tax_amount_tally']
-                
                 # Check for mismatches
                 is_mismatch = False
                 field_mismatches = []
                 
+                # 1. Check GSTIN
+                gstin_gst = str(row.get('gstin_gst', '')).strip()
+                gstin_tally = str(row.get('gstin_tally', '')).strip()
+                if gstin_gst != gstin_tally and gstin_gst != 'nan' and gstin_tally != 'nan' and gstin_gst != '' and gstin_tally != '':
+                    is_mismatch = True
+                    field_mismatches.append({
+                        "job_id": job_id, "firm_id": firm_id, "category": "field_mismatch",
+                        "match_key": invoice_no, "field_name": "gstin",
+                        "tally_value": str(row.get('gstin_raw_tally', '')).strip(), "gst_value": str(row.get('gstin_raw_gst', '')).strip(),
+                        "normalized_tally": gstin_tally, "normalized_gst": gstin_gst,
+                        "reason": f"Gstin mismatched: GST({gstin_gst}) vs Tally({gstin_tally})"
+                    })
+                
+                # 2. Check Invoice Date
+                date_gst = str(row.get('invoice_date_gst', '')).strip()
+                date_tally = str(row.get('invoice_date_tally', '')).strip()
+                if date_gst != date_tally and date_gst != 'nan' and date_tally != 'nan' and date_gst != '' and date_tally != '':
+                    is_mismatch = True
+                    field_mismatches.append({
+                        "job_id": job_id, "firm_id": firm_id, "category": "field_mismatch",
+                        "match_key": invoice_no, "field_name": "invoice_date",
+                        "tally_value": str(row.get('invoice_date_raw_tally', '')).strip(), "gst_value": str(row.get('invoice_date_raw_gst', '')).strip(),
+                        "normalized_tally": date_tally, "normalized_gst": date_gst,
+                        "reason": f"Invoice Date mismatched: GST({date_gst}) vs Tally({date_tally})"
+                    })
+                
+                # 3. Check Taxable Value
+                taxable_gst = row.get('taxable_value_gst', 0.0)
+                taxable_tally = row.get('taxable_value_tally', 0.0)
                 if not math.isclose(taxable_gst, taxable_tally, abs_tol=0.01):
                     is_mismatch = True
                     field_mismatches.append({
-                        "job_id": job_id,
-                        "firm_id": firm_id,
-                        "category": "field_mismatch",
-                        "match_key": invoice_no,
-                        "field_name": "taxable_value",
-                        "tally_value": str(taxable_tally),
-                        "gst_value": str(taxable_gst),
-                        "normalized_tally": str(taxable_tally),
-                        "normalized_gst": str(taxable_gst),
-                        "reason": f"Taxable Value mismatch: {taxable_tally} vs {taxable_gst}"
+                        "job_id": job_id, "firm_id": firm_id, "category": "field_mismatch",
+                        "match_key": invoice_no, "field_name": "taxable_value",
+                        "tally_value": str(row.get('taxable_value_raw_tally', '')).strip(), "gst_value": str(row.get('taxable_value_raw_gst', '')).strip(),
+                        "normalized_tally": str(taxable_tally), "normalized_gst": str(taxable_gst),
+                        "reason": f"Taxable Value mismatched: GST({taxable_gst}) vs Tally({taxable_tally})"
                     })
                     
+                # 4. Check Tax Amount
+                tax_gst = row.get('tax_amount_gst', 0.0)
+                tax_tally = row.get('tax_amount_tally', 0.0)
                 if not math.isclose(tax_gst, tax_tally, abs_tol=0.01):
                     is_mismatch = True
                     field_mismatches.append({
-                        "job_id": job_id,
-                        "firm_id": firm_id,
-                        "category": "field_mismatch",
-                        "match_key": invoice_no,
-                        "field_name": "tax_amount",
-                        "tally_value": str(tax_tally),
-                        "gst_value": str(tax_gst),
-                        "normalized_tally": str(tax_tally),
-                        "normalized_gst": str(tax_gst),
-                        "reason": f"Tax Amount mismatch: {tax_tally} vs {tax_gst}"
+                        "job_id": job_id, "firm_id": firm_id, "category": "field_mismatch",
+                        "match_key": invoice_no, "field_name": "tax_amount",
+                        "tally_value": str(row.get('tax_amount_raw_tally', '')).strip(), "gst_value": str(row.get('tax_amount_raw_gst', '')).strip(),
+                        "normalized_tally": str(tax_tally), "normalized_gst": str(tax_gst),
+                        "reason": f"Tax Amount mismatched: GST({tax_gst}) vs Tally({tax_tally})"
                     })
                     
                 if is_mismatch:
                     mismatched += 1
-                    format_differences += len(field_mismatches)
                     mismatches.extend(field_mismatches)
                 else:
                     matched += 1
+                    # Format Differences Check
+                    raw_diff = False
+                    if str(row.get('gstin_raw_gst', '')).strip() != str(row.get('gstin_raw_tally', '')).strip(): raw_diff = True
+                    if str(row.get('invoice_date_raw_gst', '')).strip() != str(row.get('invoice_date_raw_tally', '')).strip(): raw_diff = True
+                    if str(row.get('taxable_value_raw_gst', '')).strip() != str(row.get('taxable_value_raw_tally', '')).strip(): raw_diff = True
+                    if str(row.get('tax_amount_raw_gst', '')).strip() != str(row.get('tax_amount_raw_tally', '')).strip(): raw_diff = True
+                    if raw_diff:
+                        format_differences += 1
                     
             elif merge_status == 'left_only':
                 # Missing in Tally (Present in GST)
