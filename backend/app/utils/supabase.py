@@ -49,7 +49,7 @@ class SupabaseClient:
         """Update job summary"""
         try:
             self.client.table("reconciliation_jobs").update(
-                {"summary": summary, "updated_at": "now()"}
+                {"summary_json": summary, "updated_at": "now()"}
             ).eq("id", job_id).execute()
             return True
         except Exception as e:
@@ -101,13 +101,19 @@ class SupabaseClient:
             return None
 
     def insert_mismatch_items(self, items: List[Dict[str, Any]]) -> bool:
-        """Insert mismatch items"""
+        """Insert mismatch items in batches of 500"""
         try:
-            if items:
-                self.client.table("mismatch_items").insert(items).execute()
+            if not items:
+                return True
+            batch_size = 500
+            for i in range(0, len(items), batch_size):
+                batch = items[i:i + batch_size]
+                self.client.table("mismatch_items").insert(batch).execute()
             return True
         except Exception as e:
             print(f"Error inserting mismatch items: {e}")
+            if items:
+                print(f"  First item keys: {list(items[0].keys())}")
             return False
 
     def delete_job_mismatches(self, job_id: str) -> bool:
