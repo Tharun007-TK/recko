@@ -33,20 +33,60 @@ class ReconciliationService:
         """Initialize with mapping and rule profiles"""
         self.mapping_profile = mapping_profile or {}
         self.rule_profile = rule_profile or {}
-        self.mappings = self.mapping_profile.get("mappings", [])
-        self.rules = self.rule_profile.get("rules", {})
+        self.mappings = self.mapping_profile.get("mapping_json", [])
+        self.rules = self.rule_profile.get("rules_json", {})
 
     # ─── File Loading ─────────────────────────────────────────────────────
 
+    def _detect_header_row(self, df_raw: "pd.DataFrame", max_scan: int = 15) -> int:
+        """Auto-detect the header row by finding the first row with most non-null string cells."""
+        best_row = 0
+        best_score = 0
+        for i in range(min(max_scan, len(df_raw))):
+            row = df_raw.iloc[i]
+            score = sum(1 for v in row if isinstance(v, str) and v.strip() and not v.lower().startswith('unnamed'))
+            if score > best_score:
+                best_score = score
+                best_row = i
+        return best_row
+
     def load_excel_file(self, file_data: bytes, sheet_name: int = 0) -> Optional[pd.DataFrame]:
-        """Load Excel file into DataFrame"""
+        """Load Tally Excel file into DataFrame with auto-detected header row."""
         try:
-            df = pd.read_excel(file_data, sheet_name=sheet_name)
-            logger.info(f"Loaded Excel file with {len(df)} rows and {len(df.columns)} columns")
+            raw = pd.read_excel(file_data, sheet_name=sheet_name, header=None)
+            header_row = self._detect_header_row(raw)
+            df = pd.read_excel(file_data, sheet_name=sheet_name, header=header_row)
+            # Drop completely empty rows and columns
+            df = df.dropna(how='all').dropna(axis=1, how='all')
+            logger.info(f"Loaded Excel (sheet={sheet_name}, header_row={header_row}): {len(df)} rows, {len(df.columns)} cols")
             return df
         except Exception as e:
             logger.error(f"Error loading Excel file: {e}")
             return None
+
+    def load_gst_file(self, file_data: bytes) -> Optional[pd.DataFrame]:
+        """Load GSTR-2B Excel file, selecting the B2B sheet and auto-detecting the header row."""
+        try:
+            all_sheets = pd.read_excel(file_data, sheet_name=None, header=None)
+            # Priority: B2B sheet, otherwise the largest sheet
+            target = None
+            for preferred in ['B2B', 'b2b', 'Sheet1', 'Sheet']:
+                if preferred in all_sheets:
+                    target = preferred
+                    break
+            if target is None:
+                # Fall back to the sheet with the most rows
+                target = max(all_sheets.keys(), key=lambda s: len(all_sheets[s]))
+            raw = all_sheets[target]
+            header_row = self._detect_header_row(raw)
+            df = pd.read_excel(file_data, sheet_name=target, header=header_row)
+            df = df.dropna(how='all').dropna(axis=1, how='all')
+            logger.info(f"Loaded GST file (sheet='{target}', header_row={header_row}): {len(df)} rows, {len(df.columns)} cols")
+            return df
+        except Exception as e:
+            logger.error(f"Error loading GST file: {e}")
+            return None
+
 
     # ─── Data Normalization ───────────────────────────────────────────────
 
@@ -56,7 +96,10 @@ class ReconciliationService:
             return ""
 
         # Convert to string
-        normalized = str(value).strip()
+        if isinstance(value, float) and value.is_integer():
+            normalized = str(int(value)).strip()
+        else:
+            normalized = str(value).strip()
 
         # Trim spaces
         if self.rules.get("trim_spaces", True):
@@ -133,19 +176,25 @@ class ReconciliationService:
         self, df: pd.DataFrame, file_type: str
     ) -> Optional[pd.DataFrame]:
         """Apply mapping profile to standardize column names"""
-        if not self.mappings:
-            # If no mappings, return as-is
+        # Filter out blank/empty mappings
+        valid_mappings = [
+            m for m in self.mappings
+            if m.get("tally_column") and m.get("gst_column")
+        ]
+
+        if not valid_mappings:
+            # If no valid mappings, return as-is
             return df
 
         # Build mapping dict based on file type
         column_map = {}
-        for mapping in self.mappings:
+        for mapping in valid_mappings:
             if file_type == "tally":
                 source = mapping.get("tally_column")
                 target = mapping.get("tally_column")  # Use as standard name
             else:  # gst
                 source = mapping.get("gst_column")
-                target = mapping.get("gst_column")  # Use as standard name
+                target = mapping.get("tally_column")  # Standardize to tally_column name
 
             if source and source in df.columns:
                 column_map[source] = target
@@ -156,16 +205,36 @@ class ReconciliationService:
 
     def get_match_key(self, row: Dict[str, Any]) -> str:
         """Generate match key from row using match key mappings"""
+        valid_mappings = [
+            m for m in self.mappings
+            if m.get("tally_column") and m.get("gst_column")
+        ]
         match_key_columns = [
             m.get("tally_column")
-            for m in self.mappings
+            for m in valid_mappings
             if m.get("is_match_key")
         ]
 
         if not match_key_columns:
-            # If no match key defined, use first column + first value column
+            # Fallback: look for invoice/gstin columns by common keywords
+            invoice_keywords = ['invoice', 'voucher', 'bill', 'no', 'number', 'inv']
+            gstin_keywords = ['gstin', 'gst']
+            row_cols = list(row.index) if hasattr(row, 'index') else list(row.keys())
+            invoice_col = next(
+                (c for c in row_cols if any(kw in c.lower() for kw in invoice_keywords)), None
+            )
+            gstin_col = next(
+                (c for c in row_cols if any(kw in c.lower() for kw in gstin_keywords)), None
+            )
+            parts = []
+            for col in [invoice_col, gstin_col]:
+                if col and col in row:
+                    parts.append(self.normalize_value(row[col]))
+            if parts:
+                return "|".join(parts)
+            # Last resort: first column value
             if len(row) > 0:
-                return str(list(row.values())[0])
+                return str(row.values[0]) if hasattr(row, 'values') else str(list(row.values())[0])
             return ""
 
         parts = []

@@ -66,7 +66,7 @@ async def run_reconciliation_task(job_id: str, firm_id: str):
         # 7. Load Excel files
         import io
         tally_df = service.load_excel_file(io.BytesIO(tally_data))
-        gst_df = service.load_excel_file(io.BytesIO(gst_data))
+        gst_df = service.load_gst_file(io.BytesIO(gst_data))
 
         if tally_df is None or gst_df is None:
             logger.error("Failed to parse Excel files")
