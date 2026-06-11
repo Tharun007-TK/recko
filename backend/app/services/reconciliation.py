@@ -300,11 +300,11 @@ class ReconciliationService:
                         "firm_id": firm_id,
                         "category": "missing_in_gst",
                         "match_key": match_key,
-                        "field_name": None,
+                        "field_name": "",
                         "tally_value": str(tally_row.get("amount", "")),
-                        "gst_value": None,
+                        "gst_value": "",
                         "normalized_tally": str(tally_row.get("amount", "")),
-                        "normalized_gst": None,
+                        "normalized_gst": "",
                         "reason": "Record exists in Tally but not in GST",
                     }
                 )
@@ -319,10 +319,10 @@ class ReconciliationService:
                         "firm_id": firm_id,
                         "category": "missing_in_tally",
                         "match_key": match_key,
-                        "field_name": None,
-                        "tally_value": None,
+                        "field_name": "",
+                        "tally_value": "",
                         "gst_value": str(gst_row.get("amount", "")),
-                        "normalized_tally": None,
+                        "normalized_tally": "",
                         "normalized_gst": str(gst_row.get("amount", "")),
                         "reason": "Record exists in GST but not in Tally",
                     }
