@@ -237,9 +237,13 @@ class ReconciliationService:
                 
         df['invoice_date'] = df['invoice_date'].apply(safe_date)
         
-        # Ensure invoice_no is string
-        df['invoice_no'] = df['invoice_no'].astype(str)
+        # Ensure invoice_no is strictly cleaned and stripped to prevent trailing space mismatches
+        df['invoice_no'] = df['invoice_no'].astype(str).str.strip()
         
+        # Best practice: Also strip the GSTIN column just in case
+        if 'gstin' in df.columns:
+            df['gstin'] = df['gstin'].astype(str).str.strip().str.upper()
+            
         return df
 
     # ─── Reconciliation Logic ──────────────────────────────────────────────
