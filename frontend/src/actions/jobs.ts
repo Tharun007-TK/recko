@@ -169,27 +169,28 @@ export async function createJob(
     return { success: false, message: "Failed to create job file records" };
   }
 
-  // 4. Trigger backend reconciliation
+  // 4. Trigger backend reconciliation (fire-and-forget with short timeout)
+  // We don't wait for reconciliation to finish - the job detail page polls for status.
   const apiUrl = process.env.RECON_API_URL || "http://localhost:8000";
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 3000); // 3s max wait
   try {
     const response = await fetch(`${apiUrl}/api/reconciliation/start`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        job_id: job.id,
-        firm_id: firmId,
-      }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: job.id, firm_id: firmId }),
+      signal: controller.signal,
     });
-
     if (!response.ok) {
-      console.error("Backend returned error:", await response.text());
-      // We don't fail the creation here, but the job status might be stuck at 'uploaded'
-      // or the backend failed to start.
+      console.error("Backend returned error:", response.status);
     }
-  } catch (error) {
-    console.error("Error calling backend API:", error);
+  } catch (error: any) {
+    // AbortError = timeout (expected), other errors = backend unreachable
+    if (error?.name !== "AbortError") {
+      console.error("Error calling backend API:", error?.message);
+    }
+  } finally {
+    clearTimeout(timeoutId);
   }
 
   redirect(`/jobs/${job.id}`);

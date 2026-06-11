@@ -55,27 +55,18 @@ export default async function JobDetailPage({
     notFound();
   }
 
-  // Fetch job files
-  const { data: jobFilesData } = await supabase
-    .from("job_files")
-    .select("*")
-    .eq("job_id", id);
+  // Fetch job files, creator profile, and mismatches in parallel
+  const [
+    { data: jobFilesData },
+    { data: creatorProfile },
+    { data: mismatchesData }
+  ] = await Promise.all([
+    supabase.from("job_files").select("*").eq("job_id", id),
+    supabase.from("profiles").select("id, full_name, email").eq("id", job.created_by).single(),
+    supabase.from("mismatch_items").select("*").eq("job_id", id).order("created_at", { ascending: false }).limit(100)
+  ]);
+
   const jobFiles = jobFilesData || [];
-
-  // Fetch creator profile
-  const { data: creatorProfile } = await supabase
-    .from("profiles")
-    .select("id, full_name, email")
-    .eq("id", job.created_by)
-    .single();
-
-  // Fetch mismatches
-  const { data: mismatchesData } = await supabase
-    .from("mismatch_items")
-    .select("*")
-    .eq("job_id", id)
-    .order("created_at", { ascending: false })
-    .limit(100);
   const mismatches = mismatchesData || [];
 
   const tallyFile = jobFiles.find((f) => f.file_type === "tally_source");
