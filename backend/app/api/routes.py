@@ -74,8 +74,7 @@ def run_reconciliation_task(job_id: str, firm_id: str):
             return
 
         # 8. Apply mappings
-        tally_df = service.apply_mapping(tally_df, "tally")
-        gst_df = service.apply_mapping(gst_df, "gst")
+        # (Handled internally now)
 
         # 9. Run reconciliation
         result = service.reconcile(tally_df, gst_df, job_id, firm_id)

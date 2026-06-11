@@ -170,80 +170,77 @@ class ReconciliationService:
             logger.warning(f"Error applying numeric rounding: {e}")
             return value
 
-    # ─── Mapping and Key Generation ────────────────────────────────────────
+    # ─── Standardize and Clean Data ────────────────────────────────────────
 
-    def apply_mapping(
-        self, df: pd.DataFrame, file_type: str
-    ) -> Optional[pd.DataFrame]:
-        """Apply mapping profile to standardize column names"""
-        # Filter out blank/empty mappings
-        valid_mappings = [
-            m for m in self.mappings
-            if m.get("tally_column") and m.get("gst_column")
-        ]
-
-        if not valid_mappings:
-            # If no valid mappings, return as-is
-            return df
-
-        # Build mapping dict based on file type
+    def _standardize_and_clean(self, df: pd.DataFrame, is_gst: bool = False) -> pd.DataFrame:
+        """Standardize column names and clean data for reconciliation."""
+        df = df.copy()
+        
+        # 1. Standardize column names based on common headers
         column_map = {}
-        for mapping in valid_mappings:
-            if file_type == "tally":
-                source = mapping.get("tally_column")
-                target = mapping.get("tally_column")  # Use as standard name
-            else:  # gst
-                source = mapping.get("gst_column")
-                target = mapping.get("tally_column")  # Standardize to tally_column name
-
-            if source and source in df.columns:
-                column_map[source] = target
-
-        # Rename columns
+        for col in df.columns:
+            col_str = str(col).strip().lower()
+            
+            # invoice_no
+            if col_str in ['invoice number', 'invoice no', 'invoice_number', 'invoice_no', 'invoice', 'voucher no', 'voucher number']:
+                column_map[col] = 'invoice_no'
+            # invoice_date
+            elif col_str in ['invoice date', 'date', 'invoice_date', 'voucher date']:
+                column_map[col] = 'invoice_date'
+            # tax_amount
+            elif col_str in ['tax', 'tax amount', 'tax_amount', 'total tax', 'integrated tax', 'central tax', 'state/ut tax']:
+                # If multiple tax columns exist, this might map the last one or we can map them specifically.
+                # Since the prompt specifies mapping "Tax" / "Tax Amount" -> tax_amount, we do that.
+                if 'tax_amount' not in column_map.values(): # Map only the first one found or we could sum them
+                    column_map[col] = 'tax_amount'
+            # taxable_value
+            elif col_str in ['taxable value', 'taxable_value', 'taxable']:
+                column_map[col] = 'taxable_value'
+            # gstin
+            elif col_str in ['supplier gstin', 'gstin', 'gstin/uin', 'gstin/uin of supplier', 'ctin']:
+                column_map[col] = 'gstin'
+        
+        # Also let's check for specific tax columns if a general one is not found
         df = df.rename(columns=column_map)
+        
+        # Sum specific tax columns if a single tax amount isn't defined
+        if 'tax_amount' not in df.columns:
+            tax_cols = [c for c in df.columns if str(c).strip().lower() in ['integrated tax', 'central tax', 'state/ut tax', 'integrated tax amount', 'central tax amount', 'state/ut tax amount']]
+            if tax_cols:
+                for c in tax_cols:
+                    df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0.0)
+                df['tax_amount'] = df[tax_cols].sum(axis=1)
+
+        # Strip all strings
+        for col in df.columns:
+            if df[col].dtype == 'object':
+                df[col] = df[col].astype(str).str.strip()
+        
+        # Ensure target columns exist
+        for target in ['invoice_no', 'invoice_date', 'tax_amount', 'taxable_value', 'gstin']:
+            if target not in df.columns:
+                df[target] = None
+        
+        # Convert numeric columns safely
+        df['taxable_value'] = pd.to_numeric(df['taxable_value'], errors='coerce').fillna(0.0)
+        df['tax_amount'] = pd.to_numeric(df['tax_amount'], errors='coerce').fillna(0.0)
+        
+        # Format date safely
+        def safe_date(d):
+            if pd.isna(d) or d == 'nan' or not str(d).strip():
+                return ""
+            try:
+                parsed = pd.to_datetime(d)
+                return parsed.strftime("%Y-%m-%d")
+            except Exception:
+                return str(d).strip()
+                
+        df['invoice_date'] = df['invoice_date'].apply(safe_date)
+        
+        # Ensure invoice_no is string
+        df['invoice_no'] = df['invoice_no'].astype(str)
+        
         return df
-
-    def get_match_key(self, row: Dict[str, Any]) -> str:
-        """Generate match key from row using match key mappings"""
-        valid_mappings = [
-            m for m in self.mappings
-            if m.get("tally_column") and m.get("gst_column")
-        ]
-        match_key_columns = [
-            m.get("tally_column")
-            for m in valid_mappings
-            if m.get("is_match_key")
-        ]
-
-        if not match_key_columns:
-            # Fallback: look for invoice/gstin columns by common keywords
-            invoice_keywords = ['invoice', 'voucher', 'bill', 'no', 'number', 'inv']
-            gstin_keywords = ['gstin', 'gst']
-            row_cols = list(row.index) if hasattr(row, 'index') else list(row.keys())
-            invoice_col = next(
-                (c for c in row_cols if any(kw in c.lower() for kw in invoice_keywords)), None
-            )
-            gstin_col = next(
-                (c for c in row_cols if any(kw in c.lower() for kw in gstin_keywords)), None
-            )
-            parts = []
-            for col in [invoice_col, gstin_col]:
-                if col and col in row:
-                    parts.append(self.normalize_value(row[col]))
-            if parts:
-                return "|".join(parts)
-            # Last resort: first column value
-            if len(row) > 0:
-                return str(row.values[0]) if hasattr(row, 'values') else str(list(row.values())[0])
-            return ""
-
-        parts = []
-        for col in match_key_columns:
-            if col in row:
-                val = self.normalize_value(row[col])
-                parts.append(val)
-
-        return "|".join(parts) if parts else ""
 
     # ─── Reconciliation Logic ──────────────────────────────────────────────
 
@@ -251,87 +248,134 @@ class ReconciliationService:
         self, tally_df: pd.DataFrame, gst_df: pd.DataFrame, job_id: str, firm_id: str
     ) -> ReconciliationResult:
         """Reconcile two DataFrames"""
-        mismatches: List[Dict[str, Any]] = []
+        
+        tally_clean = self._standardize_and_clean(tally_df, is_gst=False)
+        gst_clean = self._standardize_and_clean(gst_df, is_gst=True)
+        
+        # Remove empty invoice_no
+        tally_clean = tally_clean[~tally_clean['invoice_no'].isin(['nan', 'None', ''])]
+        gst_clean = gst_clean[~gst_clean['invoice_no'].isin(['nan', 'None', ''])]
 
-        # Normalize all values
-        tally_normalized = self._normalize_dataframe(tally_df)
-        gst_normalized = self._normalize_dataframe(gst_df)
+        # Aggregate by invoice_no to handle multiple line items per invoice
+        tally_agg = tally_clean.groupby('invoice_no', as_index=False).agg({
+            'taxable_value': 'sum',
+            'tax_amount': 'sum',
+            'invoice_date': 'first',
+            'gstin': 'first'
+        })
+        gst_agg = gst_clean.groupby('invoice_no', as_index=False).agg({
+            'taxable_value': 'sum',
+            'tax_amount': 'sum',
+            'invoice_date': 'first',
+            'gstin': 'first'
+        })
 
-        # Create record maps by match key
-        tally_records = {}
-        gst_records = {}
+        # Determine total unique invoice numbers across both sets
+        all_invoices = set(tally_agg['invoice_no']).union(set(gst_agg['invoice_no']))
+        total_records = len(all_invoices)
 
-        for idx, row in tally_normalized.iterrows():
-            match_key = self.get_match_key(row)
-            if match_key:
-                tally_records[match_key] = row
-
-        for idx, row in gst_normalized.iterrows():
-            match_key = self.get_match_key(row)
-            if match_key:
-                gst_records[match_key] = row
-
-        # Compare records
+        # Merge DataFrames (Left=GST, Right=Tally as requested)
+        merged_df = pd.merge(gst_agg, tally_agg, on='invoice_no', how='outer', suffixes=('_gst', '_tally'), indicator=True)
+        
         matched = 0
         mismatched = 0
-        missing_in_gst = 0
         missing_in_tally = 0
+        missing_in_gst = 0
         format_differences = 0
+        
+        mismatches: List[Dict[str, Any]] = []
 
-        # Check all tally records
-        for match_key, tally_row in tally_records.items():
-            if match_key in gst_records:
-                gst_row = gst_records[match_key]
-                # Compare fields
-                field_mismatches = self._compare_records(
-                    tally_row, gst_row, match_key, job_id, firm_id
-                )
-                if field_mismatches:
-                    mismatches.extend(field_mismatches)
+        import math
+
+        for _, row in merged_df.iterrows():
+            merge_status = row['_merge']
+            invoice_no = row['invoice_no']
+            
+            if merge_status == 'both':
+                taxable_gst = row['taxable_value_gst']
+                taxable_tally = row['taxable_value_tally']
+                tax_gst = row['tax_amount_gst']
+                tax_tally = row['tax_amount_tally']
+                
+                # Check for mismatches
+                is_mismatch = False
+                field_mismatches = []
+                
+                if not math.isclose(taxable_gst, taxable_tally, abs_tol=0.01):
+                    is_mismatch = True
+                    field_mismatches.append({
+                        "job_id": job_id,
+                        "firm_id": firm_id,
+                        "category": "field_mismatch",
+                        "match_key": invoice_no,
+                        "field_name": "taxable_value",
+                        "tally_value": str(taxable_tally),
+                        "gst_value": str(taxable_gst),
+                        "normalized_tally": str(taxable_tally),
+                        "normalized_gst": str(taxable_gst),
+                        "reason": f"Taxable Value mismatch: {taxable_tally} vs {taxable_gst}"
+                    })
+                    
+                if not math.isclose(tax_gst, tax_tally, abs_tol=0.01):
+                    is_mismatch = True
+                    field_mismatches.append({
+                        "job_id": job_id,
+                        "firm_id": firm_id,
+                        "category": "field_mismatch",
+                        "match_key": invoice_no,
+                        "field_name": "tax_amount",
+                        "tally_value": str(tax_tally),
+                        "gst_value": str(tax_gst),
+                        "normalized_tally": str(tax_tally),
+                        "normalized_gst": str(tax_gst),
+                        "reason": f"Tax Amount mismatch: {tax_tally} vs {tax_gst}"
+                    })
+                    
+                if is_mismatch:
                     mismatched += 1
                     format_differences += len(field_mismatches)
+                    mismatches.extend(field_mismatches)
                 else:
                     matched += 1
-            else:
-                # Missing in GST
-                mismatches.append(
-                    {
-                        "job_id": job_id,
-                        "firm_id": firm_id,
-                        "category": "missing_in_gst",
-                        "match_key": match_key,
-                        "field_name": "",
-                        "tally_value": str(tally_row.get("amount", "")),
-                        "gst_value": "",
-                        "normalized_tally": str(tally_row.get("amount", "")),
-                        "normalized_gst": "",
-                        "reason": "Record exists in Tally but not in GST",
-                    }
-                )
-                missing_in_gst += 1
-
-        # Check GST records not in Tally
-        for match_key, gst_row in gst_records.items():
-            if match_key not in tally_records:
-                mismatches.append(
-                    {
-                        "job_id": job_id,
-                        "firm_id": firm_id,
-                        "category": "missing_in_tally",
-                        "match_key": match_key,
-                        "field_name": "",
-                        "tally_value": "",
-                        "gst_value": str(gst_row.get("amount", "")),
-                        "normalized_tally": "",
-                        "normalized_gst": str(gst_row.get("amount", "")),
-                        "reason": "Record exists in GST but not in Tally",
-                    }
-                )
+                    
+            elif merge_status == 'left_only':
+                # Missing in Tally (Present in GST)
                 missing_in_tally += 1
+                taxable_gst = row['taxable_value_gst']
+                tax_gst = row['tax_amount_gst']
+                mismatches.append({
+                    "job_id": job_id,
+                    "firm_id": firm_id,
+                    "category": "missing_in_tally",
+                    "match_key": invoice_no,
+                    "field_name": "",
+                    "tally_value": "",
+                    "gst_value": f"Taxable: {taxable_gst}, Tax: {tax_gst}",
+                    "normalized_tally": "",
+                    "normalized_gst": str(taxable_gst),
+                    "reason": "Record exists in GST but not in Tally",
+                })
+            elif merge_status == 'right_only':
+                # Missing in GST (Present in Tally)
+                missing_in_gst += 1
+                taxable_tally = row['taxable_value_tally']
+                tax_tally = row['tax_amount_tally']
+                mismatches.append({
+                    "job_id": job_id,
+                    "firm_id": firm_id,
+                    "category": "missing_in_gst",
+                    "match_key": invoice_no,
+                    "field_name": "",
+                    "tally_value": f"Taxable: {taxable_tally}, Tax: {tax_tally}",
+                    "gst_value": "",
+                    "normalized_tally": str(taxable_tally),
+                    "normalized_gst": "",
+                    "reason": "Record exists in Tally but not in GST",
+                })
 
         return ReconciliationResult(
             job_id=job_id,
-            total_records=len(tally_records),
+            total_records=total_records,
             matched=matched,
             mismatched=mismatched,
             missing_in_gst=missing_in_gst,
@@ -339,48 +383,6 @@ class ReconciliationService:
             format_differences=format_differences,
             mismatches=mismatches,
         )
-
-    def _normalize_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Normalize all values in a DataFrame"""
-        normalized_df = df.copy()
-        for col in normalized_df.columns:
-            normalized_df[col] = normalized_df[col].apply(self.normalize_value)
-        return normalized_df
-
-    def _compare_records(
-        self,
-        tally_row: Dict[str, Any],
-        gst_row: Dict[str, Any],
-        match_key: str,
-        job_id: str,
-        firm_id: str,
-    ) -> List[Dict[str, Any]]:
-        """Compare two records and return field mismatches"""
-        mismatches = []
-
-        # Compare all columns
-        for col in tally_row.index:
-            if col in gst_row.index:
-                tally_val = str(tally_row[col])
-                gst_val = str(gst_row[col])
-
-                if tally_val != gst_val:
-                    mismatches.append(
-                        {
-                            "job_id": job_id,
-                            "firm_id": firm_id,
-                            "category": "field_mismatch",
-                            "match_key": match_key,
-                            "field_name": col,
-                            "tally_value": tally_val,
-                            "gst_value": gst_val,
-                            "normalized_tally": tally_val,
-                            "normalized_gst": gst_val,
-                            "reason": f"Field value mismatch: {tally_val} vs {gst_val}",
-                        }
-                    )
-
-        return mismatches
 
     def generate_excel_report(self, result: ReconciliationResult) -> bytes:
         """Generate an Excel report for the reconciliation result"""

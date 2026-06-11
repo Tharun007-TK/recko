@@ -30,9 +30,7 @@ try:
     print('Loading GST file...')
     gst_df = service.load_excel_file(open('scripts/samples/gst_sample.xlsx', 'rb'))
 
-    print('Applying mappings...')
-    tally_df = service.apply_mapping(tally_df, 'tally')
-    gst_df = service.apply_mapping(gst_df, 'gst')
+    print('Applying mappings (handled internally)...')
 
     print('Tally columns:', tally_df.columns.tolist())
     print('GST columns:', gst_df.columns.tolist())
