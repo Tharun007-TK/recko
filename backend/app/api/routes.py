@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["reconciliation"])
 
 
-async def run_reconciliation_task(job_id: str, firm_id: str):
+def run_reconciliation_task(job_id: str, firm_id: str):
     """Background task to run reconciliation logic"""
     logger.info(f"Starting reconciliation background task for job {job_id}")
     try:
